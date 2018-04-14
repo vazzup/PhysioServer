@@ -2,4 +2,5 @@ env
 *~
 ~*
 *.swp
-
+__pycache__
+*.db
