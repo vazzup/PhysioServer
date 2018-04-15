@@ -26,9 +26,17 @@ def start_training(profile_no):
     result = async_start_training.delay(profile_no)
     return 'Training...'
 
-@flask_app.route('/testing', methods=['GET'])
-def testing():
-    return 'Hello World'
+@flask_app.route('/get_profiles', methods=['GET'])
+def get_profiles():
+    import sqlite3 as sql
+    connection = sql.connect('./.physio.db')
+    cursor = connection.cursor()
+    cursor.execute("""SELECT profile_no FROM profiles;""")
+    profile_nos = []
+    for row in cursor:
+        for column in row:
+            profile_nos.append(column)
+    return jsonify({"profile_nos": profile_nos})
 
 @celery.task()
 def async_start_calibration():
@@ -76,4 +84,4 @@ def async_start_training(profile_no):
     return
 
 if __name__ == '__main__':
-    flask_app.run(debug = True)
+    flask_app.run(host='0.0.0.0', port=25955)
