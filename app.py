@@ -3,12 +3,19 @@ from flask import Flask, make_response, request
 from flask import jsonify
 from flask_cors import CORS
 from celery import Celery
+import serial
+
+ser = serial.Serial('/dev/ttyUSB0', 9600)
 
 flask_app = Flask(__name__)
 flask_app.config.update(
     CELERY_BROKER_URL='redis://localhost:6379',
     CELERY_RESULT_BACKEND='redis://localhost:6379'
 )
+
+START, CALIB, TRANSMIT, BEG_T, CON_T = b's\n', b'c\n', b't\n', b'r\n', b'j\n'
+
+ACK = [str.encode('a' + str(i) + '\n') for i in range(9)]
 
 flask_app.config['CELERY_BROKER_URL'] = 'redis://localhost:6379/0'
 flask_app.config['CELERY_RESULT_BACKEND'] = 'redis://localhost:6379/0'
@@ -21,9 +28,9 @@ def start_calibration():
     result = async_start_calibration.delay()
     return 'Starting Calibration...' 
 
-@flask_app.route('/start_training/<int:profile_no>', methods=['GET'])
-def start_training(profile_no):
-    result = async_start_training.delay(profile_no)
+@flask_app.route('/start_training/<int:profile_no>/<int:reps>', methods=['GET'])
+def start_training(profile_no, reps):
+    result = async_start_training.delay(profile_no, reps)
     return 'Training...'
 
 @flask_app.route('/get_profiles', methods=['GET'])
@@ -36,17 +43,34 @@ def get_profiles():
     for row in cursor:
         for column in row:
             profile_nos.append(column)
+    print(profile_nos)
     return jsonify({"profile_nos": profile_nos})
 
 @celery.task()
 def async_start_calibration():
-    print('import serial')
-    print('send "b\'C\'" via serial')
-    print('wait until ACK received')
-    print('read data after ack')
-    print('store data as a string in variable data_s')
-    print('Send ACK')
-    data_s =  "1,1,1,1"
+    print('Starting to calibrate...')
+    data_s =  ""
+    global ser
+    global CALIB
+    global ACK
+    ser.write(CALIB)
+    ack = b'nack'
+    while ack != ACK[1]:
+        ack = ser.readline()
+    print('Calibration has started...')
+    while ack != ACK[2]:
+        ack = ser.readline()
+    print('Calibration ended! Waiting for data...')
+    global TRANSMIT
+    ser.write(TRANSMIT)
+    while ack != ACK[5]:
+        ack = ser.readline()
+    print('Receiving Data...')
+    data_bytes = ser.readline()
+    data_s = bytes.decode(data_bytes)
+    while ack != ACK[6]:
+        ack = ser.readline()
+    print('Data Received! Inserting into Database...')
     import sqlite3 as sql
     connection = sql.connect("./.physio.db")
     cursor =  connection.cursor()
@@ -57,10 +81,11 @@ def async_start_calibration():
     cursor.execute(sql_statement)
     connection.commit()
     connection.close()
+    print('Calibration and Data Insertion has been completed successfully...!')
     return
 
 @celery.task()
-def async_start_training(profile_no):
+def async_start_training(profile_no, reps):
     import sqlite3 as sql
     connection = sql.connect("./.physio.db")
     cursor =  connection.cursor()
@@ -71,17 +96,56 @@ def async_start_training(profile_no):
     for row in cursor:
         for data in row:
             data_s = data
-    print(data_s)
     connection.close()
-    data_s_sz = str(len(data_s)).encode('ascii')
-    print('Connect to device over serial')
-    print('Send "b\'T\'" to indicate training mode')
-    print('Wait for ACK')
-    print('Send size of data_s as bytes - data_s_sz')
-    print('Wait for ACK')
-    print('Send data_s')
-    print('Wait for ACK')
+    print('Data Retrieved from Database...')
+    data_bytes = data_s.encode('ascii')
+    data_length = len(data_s)
+    packet_length = 10
+    total_v = data_s.count('v')
+    full_packets = total_v // packet_length
+    packet_count, byte_count = 0, 0
+    print('Starting transmission of data...')
+    ser.write(b'r\n')
+    ack = ser.readline()
+    while ack != b'a7\n':
+        ack = ser.readline()
+    print('Ready for transmission...')
+    while packet_count < full_packets:
+        v_count = 0
+        while v_count < packet_length:
+            ser.write(data_bytes[byte_count])
+            v_count += (1 if data_bytes[byte_count] == b'v' else 0)
+            byte_count += 1
+        ser.write(b'\n')
+        print('Packet ', packet_count, ' sent...')
+        packet_count += 1
+        ack = ser.readline()
+        while ack != b'a8\n':
+            ack = ser.readline()
+        print('Packet ', packet_count, ' received...')
+        if packet_count >= full_packets:
+            print('Data Completely transmitted...')
+            break
+        print('Starting transmission of data...')
+        ser.write(b'j\n')
+        ack = ser.readline()
+        while ack != b'a7\n':
+            ack = ser.readline()
+        print('Ready for transmission...')
+    repstr=format(reps, '03d')
+    print('Starting training for ', reps, ' rep\(s\)...')
+    ser.write(str.encode('m' + repstr + '\n'))
+    ack = ser.readline()
+    while ack != b'a3\n':
+        ack = ser.readline()
+    print('Training Started...')
+    ack = ser.readline()
+    while ack != b'a4\n':
+        ack = ser.readline()
+        print('Training Successful!')
     return
 
+
 if __name__ == '__main__':
-    flask_app.run(host='0.0.0.0', port=25955)
+    flask_app.run(debug=True, threaded=True, host='0.0.0.0', port=5000)
+

@@ -5,6 +5,10 @@ Communicated between android app and arduino
 ## Contributors
 1. Chirag Shah
 2. Vatsal Kanakiya
+3. Ninad Gundu
+4. Nirav Shah
+5. Abhishek Rai
+6. Owaish Shaikh
 
 # Commands to be sent to AVR
 1. C - Start Calibration
