@@ -5,7 +5,10 @@ from flask_cors import CORS
 from celery import Celery
 import serial
 
-ser = serial.Serial('/dev/ttyUSB1', 9600)
+try:
+    ser = serial.Serial('/dev/ttyUSB1', 9600)
+except Exception as e:
+    ser = serial.Serial('/dev/ttyUSB0', 9600)
 
 flask_app = Flask(__name__)
 flask_app.config.update(
