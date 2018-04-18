@@ -5,7 +5,7 @@ from flask_cors import CORS
 from celery import Celery
 import serial
 
-ser = serial.Serial('/dev/ttyUSB0', 9600)
+ser = serial.Serial('/dev/ttyUSB1', 9600)
 
 flask_app = Flask(__name__)
 flask_app.config.update(
@@ -45,6 +45,11 @@ def get_profiles():
             profile_nos.append(column)
     print(profile_nos)
     return jsonify({"profile_nos": profile_nos})
+
+@flask_app.route('/delete_profile/<int:profile_no>', methods=['GET'])
+def delete_profile(profile_no):
+    async_delete_profile.delay(profile_no)
+    return 'Deleting...'
 
 @celery.task()
 def async_start_calibration():
@@ -142,9 +147,26 @@ def async_start_training(profile_no, reps):
     ack = ser.readline()
     while ack != b'a4\n':
         ack = ser.readline()
-        print('Training Successful!')
+    print('Training Successful!')
     return
 
+@celery.task()
+def async_delete_profile(profile_no):
+    import sqlite3 as sql
+    connection = sql.connect("./.physio.db")
+    cursor =  connection.cursor()
+    if profile_no is not 0:
+        sql_statement =  "DELETE FROM profiles WHERE profile_no IS {0};"\
+                                    .format(profile_no)
+        cursor.execute(sql_statement)
+    else:
+        sql_statement = """DROP TABLE IF EXISTS profiles;"""
+        cursor.execute(sql_statement)
+        connection.commit()
+        sql_statement = "CREATE TABLE IF NOT EXISTS profiles(profile_no INTEGER\
+                PRIMARY KEY AUTOINCREMENT, profile_desc varchar(1500) NOT NULL);"
+        cursor.execute(sql_statement)
+    connection.commit()
 
 if __name__ == '__main__':
     flask_app.run(debug=True, threaded=True, host='0.0.0.0', port=5000)
