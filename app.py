@@ -1,16 +1,20 @@
 #!/usr/bin/env python
+import sqlite3
 from flask import Flask, make_response, request
-from flask import jsonify
+from flask import jsonify, g
 from flask_cors import CORS
 from celery import Celery
 import serial
 
-try:
+'''try:
     ser = serial.Serial('/dev/ttyUSB1', 9600)
 except Exception as e:
     ser = serial.Serial('/dev/ttyUSB0', 9600)
+'''
+DATABASE = './.physio.db'
 
 flask_app = Flask(__name__)
+CORS(flask_app)
 flask_app.config.update(
     CELERY_BROKER_URL='redis://localhost:6379',
     CELERY_RESULT_BACKEND='redis://localhost:6379'
@@ -26,6 +30,38 @@ flask_app.config['CELERY_RESULT_BACKEND'] = 'redis://localhost:6379/0'
 celery = Celery(flask_app.name, broker=flask_app.config['CELERY_BROKER_URL'])
 celery.conf.update(flask_app.config)
 
+def get_db():
+    db = getattr(g, '_database', None)
+    if db is None:
+        db = g._database = sqlite3.connect(DATABASE)
+        def make_dicts(cursor, row):
+            return dict((cursor.description[idx][0], value)
+                        for idx, value in enumerate(row))
+        db.row_factory = make_dicts
+    return db
+
+def query_db(query, args=(), one=False):
+    cursor = get_db().execute(query, args)
+    print("QUERY IS ", query.format(*args))
+    rowvalues = cursor.fetchall()
+    cursor.close()
+    return (rowvalues[0] if rowvalues else None) if one else rowvalues
+
+@flask_app.teardown_appcontext
+def close_connection(exception):
+    db = getattr(g, '_database', None)
+    if db is not None:
+        db.close()
+
+def init_db():
+    with flask_app.app_context():
+        db = get_db()
+        with flask_app.open_resource('schema.sql', 'r') as f:
+            db.cursor().executescript(f.read())
+        db.commit()
+
+init_db()
+
 @flask_app.route('/start_calibration', methods=['GET'])
 def start_calibration():
     result = async_start_calibration.delay()
@@ -36,23 +72,41 @@ def start_training(profile_no, reps):
     result = async_start_training.delay(profile_no, reps)
     return 'Training...'
 
-@flask_app.route('/get_profiles', methods=['GET'])
-def get_profiles():
-    import sqlite3 as sql
-    connection = sql.connect('./.physio.db')
-    cursor = connection.cursor()
-    cursor.execute("""SELECT profile_no FROM profiles;""")
-    profile_nos = []
-    for row in cursor:
-        for column in row:
-            profile_nos.append(column)
-    print(profile_nos)
-    return jsonify({"profile_nos": profile_nos})
+@flask_app.route('/get_profiles/<int:patientid>', methods=['GET'])
+def get_profiles(patientid):
+    sql = "SELECT profileid, description from ExerciseProfiles WHERE patientid is ?;"
+    profiles = query_db(sql, [patientid])
+    return jsonify({"profiles": profiles})
 
 @flask_app.route('/delete_profile/<int:profile_no>', methods=['GET'])
 def delete_profile(profile_no):
     async_delete_profile.delay(profile_no)
     return 'Deleting...'
+
+@flask_app.route('/loginverify', methods=['POST'])
+def loginverify():
+    try:
+        email = "\"" + request.form['email'] + "\""
+        password = "\"" + request.form['password'] + "\""
+        print(email, password)
+        sql = "SELECT * FROM Doctors WHERE email is " + email + " AND password is " + password + ";"
+        print(sql)
+        count = query_db(sql, one=True)
+        # for key, value in count.items():
+            # print (key, value)
+        if count is not None:
+            return jsonify({"status": "OK", "doctorid": count["doctorid"], "doctorname": count["name"]})
+        else:
+            return jsonify({"status": "NOK"})
+    except Exception as e:
+        print(e)
+        return jsonify({"status": "NOK"})
+
+@flask_app.route('/getpatients/<int:doctorid>', methods=['GET'])
+def getpatients(doctorid):
+    sql = "SELECT * from Patients WHERE patientid IS (SELECT patientid FROM DP WHERE doctorid IS ? );"
+    result = query_db(sql, [doctorid])
+    return jsonify({"result": result})
 
 @celery.task()
 def async_start_calibration():
