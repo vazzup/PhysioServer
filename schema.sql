@@ -33,4 +33,5 @@ CREATE TABLE IF NOT EXISTS TrainingsLedger(
 	doctorid INTEGER NOT NULL,
 	patientid INTEGER NOT NULL,
 	profileid INTEGER NOT NULL,
+	repetitions INTEGER NOT NULL,
 	timestamp TEXT NOT NULL);
