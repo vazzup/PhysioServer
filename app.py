@@ -39,7 +39,7 @@ def start_training(profile_no, reps):
 @flask_app.route('/get_profiles', methods=['GET'])
 def get_profiles():
     import sqlite3 as sql
-    connection = sql.connect('./.physio.db')
+    connection = sql.connect('/home/pi/physioServer/PhysioServer/.physio.db')
     cursor = connection.cursor()
     cursor.execute("""SELECT profile_no FROM profiles;""")
     profile_nos = []
@@ -80,7 +80,7 @@ def async_start_calibration():
         ack = ser.readline()
     print('Data Received! Inserting into Database...')
     import sqlite3 as sql
-    connection = sql.connect("./.physio.db")
+    connection = sql.connect("/home/pi/physioServer/PhysioServer/.physio.db")
     cursor =  connection.cursor()
     cursor.execute("""CREATE TABLE IF NOT EXISTS profiles(profile_no INTEGER\
             PRIMARY KEY AUTOINCREMENT, profile_desc varchar(1500) NOT NULL);""")
@@ -95,7 +95,7 @@ def async_start_calibration():
 @celery.task()
 def async_start_training(profile_no, reps):
     import sqlite3 as sql
-    connection = sql.connect("./.physio.db")
+    connection = sql.connect("/home/pi/physioServer/PhysioServer/.physio.db")
     cursor =  connection.cursor()
     sql_statement =  "SELECT profile_desc FROM profiles WHERE profile_no IS {0};"\
                                 .format(profile_no)
@@ -156,7 +156,7 @@ def async_start_training(profile_no, reps):
 @celery.task()
 def async_delete_profile(profile_no):
     import sqlite3 as sql
-    connection = sql.connect("./.physio.db")
+    connection = sql.connect("/home/pi/physioServer/PhysioServer/.physio.db")
     cursor =  connection.cursor()
     if profile_no is not 0:
         sql_statement =  "DELETE FROM profiles WHERE profile_no IS {0};"\
