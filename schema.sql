@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS ExerciseProfiles(
 	patientid INTEGER NOT NULL,
 	description TEXT,
 	profile TEXT,
+	lastused TEXT,
 	FOREIGN KEY (doctorid) REFERENCES Doctors(doctorid),
 	FOREIGN KEY (patientid) REFERENCES Patients(patientid)
 	);

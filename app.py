@@ -73,9 +73,8 @@ def start_training(doctorid, patientid, profileid, reps):
 
 @flask_app.route('/get_profiles/<int:patientid>', methods=['GET'])
 def get_profiles(patientid):
-    sql = "SELECT E.profileid, E.description, T.timestamp, D.name AS doctorname\
-        FROM ExerciseProfiles E LEFT JOIN TrainingsLedger T ON T.profileid = E.profileid\
-        INNER JOIN DP ON DP.patientid = E.patientid\
+    sql = "SELECT E.profileid, E.description, E.lastused, D.name AS doctorname\
+        FROM ExerciseProfiles E INNER JOIN DP ON DP.patientid = E.patientid\
         INNER JOIN Doctors D ON D.doctorid = DP.doctorid WHERE E.patientid is ? ;"
     profiles = query_db(sql, [patientid])
     return jsonify({"profiles": profiles})
@@ -152,7 +151,7 @@ def gettrainings(patientid):
 def async_start_calibration(patientid, doctorid, description):
     print('Starting to calibrate...')
     data_s =  "1,1,1,1"
-    global ser
+    """global ser
     global CALIB
     global ACK
     ser.write(CALIB)
@@ -172,7 +171,11 @@ def async_start_calibration(patientid, doctorid, description):
     data_s = bytes.decode(data_bytes)
     while ack != ACK[6]:
         ack = ser.readline()
-    print('Data Received! Inserting into Database...')
+    print('Data Received! Inserting into Database...')"""
+    if description[0] is "\"":
+        description = description[1:]
+    if description[len(description) - 1] is "\"":
+        description = description[:len(description) - 1]
     sql = "INSERT INTO ExerciseProfiles(doctorid, patientid, description, profile) VALUES(\
              ? , ? , ? , ? );"
     args = [doctorid, patientid, description, data_s]
@@ -180,7 +183,7 @@ def async_start_calibration(patientid, doctorid, description):
         get_db().execute(sql, args)
         get_db().commit()
     print('Calibration and Data Insertion has been completed successfully...!')
-    return
+    return 
 
 @celery.task()
 def async_start_training(doctorid, patientid, profileid, reps):
@@ -190,6 +193,7 @@ def async_start_training(doctorid, patientid, profileid, reps):
         args = [profileid]
         result = query_db(sql_statement, args, one=True)
         data_s = result['profile']
+    '''print(data_s)
     print('Data Retrieved from Database...')
     data_bytes = data_s.encode('ascii')
     data_length = len(data_s)
@@ -235,13 +239,17 @@ def async_start_training(doctorid, patientid, profileid, reps):
     ack = ser.readline()
     while ack != b'a4\n':
         ack = ser.readline()
-    print('Training Successful!')
+    print('Training Successful!')'''
     with flask_app.app_context():
-        sql = "INSERT INTO TrainingsLedger(doctorid, patientid, profileid, repetitions, timestamp) VALUES( ? , ? , ? , ? , datetime('now'));"
+        sql = "INSERT INTO TrainingsLedger(doctorid, patientid, profileid, repetitions, timestamp) VALUES( ? , ? , ? , ? , date('now'));"
         args = [doctorid, patientid, profileid, reps]
         get_db().execute(sql, args)
         get_db().commit()
-    return
+        sql = "UPDATE ExerciseProfiles SET lastused = date('now') WHERE profileid is ? ;"
+        args = [profileid]
+        get_db().execute(sql, args)
+        get_db().commit()
+    return 
 
 @celery.task()
 def async_delete_profile(profile_no):
