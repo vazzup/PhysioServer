@@ -34,4 +34,8 @@ CREATE TABLE IF NOT EXISTS TrainingsLedger(
 	patientid INTEGER NOT NULL,
 	profileid INTEGER NOT NULL,
 	repetitions INTEGER NOT NULL,
-	timestamp TEXT NOT NULL);
+	timestamp TEXT NOT NULL,
+	FOREIGN KEY (profileid) REFERENCES ExerciseProfiles(profileid),
+	FOREIGN KEY (doctorid) REFERENCES Doctors(doctorid),
+	FOREIGN KEY (patientid) REFERENCES Patients(patientid)
+	);

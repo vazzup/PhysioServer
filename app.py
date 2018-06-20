@@ -73,7 +73,10 @@ def start_training(doctorid, patientid, profileid, reps):
 
 @flask_app.route('/get_profiles/<int:patientid>', methods=['GET'])
 def get_profiles(patientid):
-    sql = "SELECT profileid, description from ExerciseProfiles WHERE patientid is ?;"
+    sql = "SELECT E.profileid, E.description, T.timestamp, D.name AS doctorname\
+        FROM ExerciseProfiles E LEFT JOIN TrainingsLedger T ON T.profileid = E.profileid\
+        INNER JOIN DP ON DP.patientid = E.patientid\
+        INNER JOIN Doctors D ON D.doctorid = DP.doctorid WHERE E.patientid is ? ;"
     profiles = query_db(sql, [patientid])
     return jsonify({"profiles": profiles})
 
@@ -135,6 +138,16 @@ def patientsignup():
     get_db().execute(sql, args)
     get_db().commit()
 
+@flask_app.route('/gettrainings/<int:patientid>', methods=['GET'])
+def gettrainings(patientid):
+    sql = 'SELECT T.trainingid, T.doctorid, D.name AS doctorname, T.profileid, P.description,\
+        T.repetitions, T.timestamp FROM TrainingsLedger T INNER JOIN ExerciseProfiles P on\
+        T.profileid = P.profileid INNER JOIN Doctors D ON T.doctorid = D.doctorid\
+        WHERE T.patientid IS ? ;'
+    args = [patientid]
+    result = query_db(sql, args)
+    return jsonify({"result": result})
+
 @celery.task()
 def async_start_calibration(patientid, doctorid, description):
     print('Starting to calibrate...')
@@ -162,7 +175,7 @@ def async_start_calibration(patientid, doctorid, description):
     print('Data Received! Inserting into Database...')
     sql = "INSERT INTO ExerciseProfiles(doctorid, patientid, description, profile) VALUES(\
              ? , ? , ? , ? );"
-    args = [doctorid, patientid, "\"" + description + "\"", "\"" + data_s + "\""]
+    args = [doctorid, patientid, description, data_s]
     with flask_app.app_context():
         get_db().execute(sql, args)
         get_db().commit()
@@ -250,4 +263,3 @@ def async_delete_profile(profile_no):
 
 if __name__ == '__main__':
     flask_app.run(debug=True, threaded=True, host='0.0.0.0', port=5000)
-
