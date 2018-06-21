@@ -5,6 +5,7 @@ from flask import jsonify, g
 from flask_cors import CORS
 from celery import Celery
 import serial
+import copy
 
 '''try:
     ser = serial.Serial('/dev/ttyUSB1', 9600)
@@ -146,6 +147,22 @@ def gettrainings(patientid):
     args = [patientid]
     result = query_db(sql, args)
     return jsonify({"result": result})
+
+@flask_app.route('/getrepdata/<int:patientid>', methods=['GET'])
+def getrepdata(patientid):
+    sql = 'SELECT repetitions, timestamp from TrainingsLedger WHERE patientid = ? ;'
+    args = [patientid]
+    result = query_db(sql, args)
+    return jsonify({'result': result})
+
+@flask_app.route('/getrangedata/<int:patientid>', methods=['GET'])
+def getrangedata(patientid):
+    sql = 'SELECT E.profile, T.timestamp from TrainingsLedger T LEFT JOIN ExerciseProfiles E\
+            ON E.profileid = T.profileid WHERE E.patientid = ? ;'
+    args = [patientid]
+    result = query_db(sql, args)
+    return jsonify({'result': result})
+
 
 @celery.task()
 def async_start_calibration(patientid, doctorid, description):
