@@ -1,16 +1,21 @@
 #!/usr/bin/env python
+import sqlite3
 from flask import Flask, make_response, request
-from flask import jsonify
+from flask import jsonify, g
 from flask_cors import CORS
 from celery import Celery
 import serial
+import copy
 
 try:
     ser = serial.Serial('/dev/ttyUSB1', 9600)
 except Exception as e:
     ser = serial.Serial('/dev/ttyUSB0', 9600)
 
+DATABASE = './.physio.db'
+
 flask_app = Flask(__name__)
+CORS(flask_app)
 flask_app.config.update(
     CELERY_BROKER_URL='redis://localhost:6379',
     CELERY_RESULT_BACKEND='redis://localhost:6379'
@@ -26,16 +31,48 @@ flask_app.config['CELERY_RESULT_BACKEND'] = 'redis://localhost:6379/0'
 celery = Celery(flask_app.name, broker=flask_app.config['CELERY_BROKER_URL'])
 celery.conf.update(flask_app.config)
 
-@flask_app.route('/start_calibration', methods=['GET'])
-def start_calibration():
-    result = async_start_calibration.delay()
+def get_db():
+    db = getattr(g, '_database', None)
+    if db is None:
+        db = g._database = sqlite3.connect(DATABASE)
+        def make_dicts(cursor, row):
+            return dict((cursor.description[idx][0], value)
+                        for idx, value in enumerate(row))
+        db.row_factory = make_dicts
+    return db
+
+def query_db(query, args=(), one=False):
+    cursor = get_db().execute(query, args)
+    rowvalues = cursor.fetchall()
+    cursor.close()
+    return (rowvalues[0] if rowvalues else None) if one else rowvalues
+
+@flask_app.teardown_appcontext
+def close_connection(exception):
+    db = getattr(g, '_database', None)
+    if db is not None:
+        db.close()
+
+def init_db():
+    with flask_app.app_context():
+        db = get_db()
+        with flask_app.open_resource('schema.sql', 'r') as f:
+            db.cursor().executescript(f.read())
+        db.commit()
+
+init_db()
+
+@flask_app.route('/start_calibration/<int:doctorid>/<int:patientid>/<description>', methods=['GET'])
+def start_calibration(doctorid, patientid, description):
+    result = async_start_calibration.delay(doctorid, patientid, description)
     return 'Starting Calibration...' 
 
-@flask_app.route('/start_training/<int:profile_no>/<int:reps>', methods=['GET'])
-def start_training(profile_no, reps):
-    result = async_start_training.delay(profile_no, reps)
+@flask_app.route('/start_training/<int:doctorid>/<int:patientid>/<int:profileid>/<int:reps>', methods=['GET'])
+def start_training(doctorid, patientid, profileid, reps):
+    result = async_start_training.delay(doctorid, patientid, profileid, reps)
     return 'Training...'
 
+<<<<<<< HEAD
 @flask_app.route('/get_profiles', methods=['GET'])
 def get_profiles():
     import sqlite3 as sql
@@ -48,16 +85,104 @@ def get_profiles():
             profile_nos.append(column)
     print(profile_nos)
     return jsonify({"profile_nos": profile_nos})
+=======
+@flask_app.route('/get_profiles/<int:patientid>', methods=['GET'])
+def get_profiles(patientid):
+    sql = "SELECT E.profileid, E.description, E.lastused, D.name AS doctorname\
+        FROM ExerciseProfiles E INNER JOIN DP ON DP.patientid = E.patientid\
+        INNER JOIN Doctors D ON D.doctorid = DP.doctorid WHERE E.patientid is ? ;"
+    profiles = query_db(sql, [patientid])
+    return jsonify({"profiles": profiles})
+>>>>>>> SIH
 
 @flask_app.route('/delete_profile/<int:profile_no>', methods=['GET'])
 def delete_profile(profile_no):
     async_delete_profile.delay(profile_no)
     return 'Deleting...'
 
+@flask_app.route('/loginverify', methods=['POST'])
+def loginverify():
+    try:
+        email = "\"" + request.form['email'] + "\""
+        password = "\"" + request.form['password'] + "\""
+        print(email, password)
+        sql = "SELECT * FROM Doctors WHERE email is " + email + " AND password is " + password + ";"
+        print(sql)
+        count = query_db(sql, one=True)
+        if count is not None:
+            return jsonify({"status": "OK", "doctorid": count["doctorid"], "doctorname": count["name"]})
+        else:
+            return jsonify({"status": "NOK"})
+    except Exception as e:
+        print(e)
+        return jsonify({"status": "NOK"})
+
+@flask_app.route('/getpatients/<int:doctorid>', methods=['GET'])
+def getpatients(doctorid):
+    sql = "SELECT Patients.patientid, Patients.name, Patients.age, Patients.sex, Patients.description from Patients INNER JOIN DP ON Patients.patientid = DP.patientid WHERE DP.doctorid = ? ;"
+    result = query_db(sql, [doctorid])
+    return jsonify({"result": result})
+
+@flask_app.route('/doctorsignup', methods=['POST'])
+def doctorsignup():
+    email = request.form['email'] 
+    password = request.form['password']
+    name = request.form['name']
+    sql = "INSERT INTO Doctors(name, email, password) VALUES( ? , ? , ? );"
+    args = [name, email, password]
+    get_db().execute(sql, args)
+    get_db().commit()
+    return 'Doctor Signed Up Successfully!'
+
+@flask_app.route('/patientsignup', methods=['POST'])
+def patientsignup():
+    doctorid = request.form['doctorid']
+    name = request.form['name']
+    age = request.form['age']
+    sex = request.form['sex']
+    description = request.form['description']
+    sql = "INSERT INTO Patients(name, age, sex, description) VALUES( ? , ? , ? , ? );"
+    args = [name, age, sex, description]
+    get_db().execute(sql, args)
+    get_db().commit()
+    sql = "SELECT count(*) FROM PATIENTS;"
+    result = query_db(sql, one=True)
+    patientid = result['count(*)']
+    sql = "INSERT INTO DP VALUES( ? , ? );"
+    args = [doctorid, patientid]
+    get_db().execute(sql, args)
+    get_db().commit()
+
+@flask_app.route('/gettrainings/<int:patientid>', methods=['GET'])
+def gettrainings(patientid):
+    sql = 'SELECT T.trainingid, T.doctorid, D.name AS doctorname, T.profileid, P.description,\
+        T.repetitions, T.timestamp FROM TrainingsLedger T INNER JOIN ExerciseProfiles P on\
+        T.profileid = P.profileid INNER JOIN Doctors D ON T.doctorid = D.doctorid\
+        WHERE T.patientid IS ? ;'
+    args = [patientid]
+    result = query_db(sql, args)
+    return jsonify({"result": result})
+
+@flask_app.route('/getrepdata/<int:patientid>', methods=['GET'])
+def getrepdata(patientid):
+    sql = 'SELECT repetitions, timestamp from TrainingsLedger WHERE patientid = ? ;'
+    args = [patientid]
+    result = query_db(sql, args)
+    return jsonify({'result': result})
+
+@flask_app.route('/getrangedata/<int:patientid>', methods=['GET'])
+def getrangedata(patientid):
+    sql = 'SELECT E.profile, T.timestamp from TrainingsLedger T LEFT JOIN ExerciseProfiles E\
+            ON E.profileid = T.profileid WHERE E.patientid = ? ;'
+    args = [patientid]
+    result = query_db(sql, args)
+    return jsonify({'result': result})
+
+
 @celery.task()
-def async_start_calibration():
+def async_start_calibration(patientid, doctorid, description):
     print('Starting to calibrate...')
-    data_s =  ""
+    data_s =  "1,1,1,1"
     global ser
     global CALIB
     global ACK
@@ -79,32 +204,28 @@ def async_start_calibration():
     while ack != ACK[6]:
         ack = ser.readline()
     print('Data Received! Inserting into Database...')
-    import sqlite3 as sql
-    connection = sql.connect("/home/pi/physioServer/PhysioServer/.physio.db")
-    cursor =  connection.cursor()
-    cursor.execute("""CREATE TABLE IF NOT EXISTS profiles(profile_no INTEGER\
-            PRIMARY KEY AUTOINCREMENT, profile_desc varchar(1500) NOT NULL);""")
-    connection.commit()
-    sql_statement = "INSERT INTO profiles(profile_desc) VALUES(\'{0}\');".format(data_s)
-    cursor.execute(sql_statement)
-    connection.commit()
-    connection.close()
+    if description[0] is "\"":
+        description = description[1:]
+    if description[len(description) - 1] is "\"":
+        description = description[:len(description) - 1]
+    sql = "INSERT INTO ExerciseProfiles(doctorid, patientid, description, profile) VALUES(\
+             ? , ? , ? , ? );"
+    args = [doctorid, patientid, description, data_s]
+    with flask_app.app_context():
+        get_db().execute(sql, args)
+        get_db().commit()
     print('Calibration and Data Insertion has been completed successfully...!')
-    return
+    return 
 
 @celery.task()
-def async_start_training(profile_no, reps):
-    import sqlite3 as sql
-    connection = sql.connect("/home/pi/physioServer/PhysioServer/.physio.db")
-    cursor =  connection.cursor()
-    sql_statement =  "SELECT profile_desc FROM profiles WHERE profile_no IS {0};"\
-                                .format(profile_no)
-    cursor.execute(sql_statement)
+def async_start_training(doctorid, patientid, profileid, reps):
     data_s = ""
-    for row in cursor:
-        for data in row:
-            data_s = data
-    connection.close()
+    with flask_app.app_context():
+        sql_statement =  "SELECT profile FROM ExerciseProfiles WHERE profileid IS ? ;"
+        args = [profileid]
+        result = query_db(sql_statement, args, one=True)
+        data_s = result['profile']
+    print(data_s)
     print('Data Retrieved from Database...')
     data_bytes = data_s.encode('ascii')
     data_length = len(data_s)
@@ -151,7 +272,16 @@ def async_start_training(profile_no, reps):
     while ack != b'a4\n':
         ack = ser.readline()
     print('Training Successful!')
-    return
+    with flask_app.app_context():
+        sql = "INSERT INTO TrainingsLedger(doctorid, patientid, profileid, repetitions, timestamp) VALUES( ? , ? , ? , ? , date('now'));"
+        args = [doctorid, patientid, profileid, reps]
+        get_db().execute(sql, args)
+        get_db().commit()
+        sql = "UPDATE ExerciseProfiles SET lastused = date('now') WHERE profileid is ? ;"
+        args = [profileid]
+        get_db().execute(sql, args)
+        get_db().commit()
+    return 
 
 @celery.task()
 def async_delete_profile(profile_no):
@@ -173,4 +303,3 @@ def async_delete_profile(profile_no):
 
 if __name__ == '__main__':
     flask_app.run(debug=True, threaded=True, host='0.0.0.0', port=5000)
-
