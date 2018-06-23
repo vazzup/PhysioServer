@@ -7,11 +7,11 @@ from celery import Celery
 import serial
 import copy
 
-'''try:
+try:
     ser = serial.Serial('/dev/ttyUSB1', 9600)
 except Exception as e:
     ser = serial.Serial('/dev/ttyUSB0', 9600)
-'''
+
 DATABASE = './.physio.db'
 
 flask_app = Flask(__name__)
@@ -168,7 +168,7 @@ def getrangedata(patientid):
 def async_start_calibration(patientid, doctorid, description):
     print('Starting to calibrate...')
     data_s =  "1,1,1,1"
-    """global ser
+    global ser
     global CALIB
     global ACK
     ser.write(CALIB)
@@ -188,7 +188,7 @@ def async_start_calibration(patientid, doctorid, description):
     data_s = bytes.decode(data_bytes)
     while ack != ACK[6]:
         ack = ser.readline()
-    print('Data Received! Inserting into Database...')"""
+    print('Data Received! Inserting into Database...')
     if description[0] is "\"":
         description = description[1:]
     if description[len(description) - 1] is "\"":
@@ -210,7 +210,7 @@ def async_start_training(doctorid, patientid, profileid, reps):
         args = [profileid]
         result = query_db(sql_statement, args, one=True)
         data_s = result['profile']
-    '''print(data_s)
+    print(data_s)
     print('Data Retrieved from Database...')
     data_bytes = data_s.encode('ascii')
     data_length = len(data_s)
@@ -256,7 +256,7 @@ def async_start_training(doctorid, patientid, profileid, reps):
     ack = ser.readline()
     while ack != b'a4\n':
         ack = ser.readline()
-    print('Training Successful!')'''
+    print('Training Successful!')
     with flask_app.app_context():
         sql = "INSERT INTO TrainingsLedger(doctorid, patientid, profileid, repetitions, timestamp) VALUES( ? , ? , ? , ? , date('now'));"
         args = [doctorid, patientid, profileid, reps]
